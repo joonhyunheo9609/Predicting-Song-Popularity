@@ -1,133 +1,94 @@
-# Predicting-Song-Popularity
-A comprehensive data science project analyzing Billboard Hot 100 data from 1946-2022 to predict song popularity and examine temporal trends in music features. This study employs two complementary approaches: linear regression for popularity prediction and time series analysis for trend forecasting.
-Research Questions
+# Music Over the Decades: Predicting Song Popularity
 
-Which sound features best predict a song's popularity today?
-How have the sound features of popular songs changed across different decades?
+A comprehensive data science project analyzing Billboard Hot 100 data from 1946-2022 to predict song popularity and examine temporal trends in music features using linear regression and time series analysis.
 
-Technical Stack
+## Research Questions
 
-Language: R, RMarkdown
-Core Libraries:
+1. **Which sound features best predict a song's popularity today?**
+2. **How have the sound features of popular songs changed across different decades?**
 
-Data Analysis: tidyverse, caret
-Visualization: ggplot2
-Time Series: forecast, tseries, zoo
+## Dataset
 
+- **Source**: [Kaggle: Billboard Hot 100 Songs Spotify Data](https://www.kaggle.com/datasets/tushar5harma/billboard-hot-100-songs-spotify-data-1946-2022)
+- **Size**: 6,879 songs with 24 variables
+- **Timespan**: 1946-2022 (76 years)
+- **Target Variable**: Popularity (0-100 Spotify score)
+- **Key Features**: Acousticness, Danceability, Energy, Instrumentalness, Liveness, Loudness, Speechiness, Tempo, Valence
 
-Methods: Stepwise Linear Regression, ARIMA Modeling, Cross-validation
-Data Processing: Feature engineering, outlier analysis, train-test splitting
+## Technical Stack
 
-Dataset
+- **Language**: R
+- **Core Libraries**: `tidyverse`, `caret`, `ggplot2`, `forecast`, `tseries`, `zoo`
+- **Methods**: Stepwise Linear Regression, ARIMA Modeling, 10-fold Cross-validation
 
-Source: Kaggle "Billboard Hot 100 Songs Spotify Data (1946-2022)"
-Size: 6,879 songs, 24 variables
-Outcome Variable: Popularity (Spotify popularity score 0-100)
-Key Predictors: Acousticness, Danceability, Energy, Instrumentalness, Liveness, Loudness, Speechiness, Tempo, Valence
+## Key Findings
 
-Project Structure
-music-popularity-analysis/
-│
-├── README.md
-├── analysis/
-│   ├── milestone2_JasonKenney_JoonhyunHeo.Rmd    # Main analysis file
-│   └── milestone2_JasonKenney_JoonhyunHeo.pdf    # Compiled report
-├── data/
-│   └── Billboard_Hot100_Songs_Spotify_1946-2022.csv
-├── docs/
-│   └── project_requirements.pdf
-└── visualizations/
-    ├── popularity_distribution.png
-    ├── features_timeseries.png
-    ├── arima_forecast.png
-    └── model_comparison.png
-Key Findings
-Model 1: Linear Regression (Stepwise)
+### Model 1: Linear Regression (Stepwise)
+- **Performance**: RMSE = 18.00, R² = 0.25, MAE = 14.08
+- **Selected Features**: 7 out of 9 features (excluded Tempo and Speechiness)
+- **Key Predictors**:
+  - **Danceability** (+): Higher danceability increases popularity
+  - **Loudness** (+): Louder songs tend to be more popular
+  - **Acousticness** (-): More acoustic songs are less popular on Spotify
 
-Selected Features: 7 out of 9 features (excluded Tempo and Speechiness)
-Performance Metrics:
+### Model 2: Time Series Analysis (ARIMA)
+- **Features Analyzed**: Danceability, Acousticness, Loudness (1946-2022)
+- **Performance**: ARIMA models outperformed simple mean forecasts
+- **Historical Trends**:
+  - **Danceability**: Steady increase since 1980s
+  - **Acousticness**: Dramatic decline starting around 1980
+  - **Loudness**: Consistent increase over decades, now stabilizing
+- **Future Forecasts**: 5-year predictions (2023-2027) showing trend continuation
 
-RMSE: 18.00
-R²: 0.25 (25% variance explained)
-MAE: 14.08
+### Cross-Model Insights
+Features that predict higher popularity today (danceability ↑, loudness ↑, acousticness ↓) are the same features that have been trending historically, suggesting co-evolution between music production and listener preferences.
 
+## Installation and Usage
 
-Key Predictors (in order of importance):
-
-Danceability (+): Higher danceability increases popularity
-Loudness (+): Louder songs tend to be more popular
-Acousticness (-): More acoustic songs are less popular on Spotify
-
-
-
-Model 2: Time Series Analysis (ARIMA)
-
-Features Analyzed: Danceability, Acousticness, Loudness (1946-2022)
-Model Performance: ARIMA models outperformed simple mean forecasts
-Historical Trends:
-
-Danceability: Steady increase since 1980s
-Acousticness: Dramatic decline starting around 1980
-Loudness: Consistent increase over decades, now stabilizing
-
-
-Future Forecasts (2023-2027): Trends expected to continue with some stabilization
-
-Cross-Model Insights
-A remarkable finding emerged when comparing both models: features that predict higher popularity today (danceability ↑, loudness ↑, acousticness ↓) are the same features that have been trending upward/downward historically. This suggests a co-evolution between music production techniques and listener preferences.
-Business Applications
-
-Music Production: Guidance for artists and producers on popularity-driving features
-Streaming Platforms: Understanding user preferences for recommendation algorithms
-Market Research: Quantifying music industry trends for strategic planning
-A&R Decisions: Data-driven insights for talent scouting and song selection
-
-Technical Achievements
-
-Large-scale Data Analysis: Processed 6,879 observations across 76-year timespan
-Model Validation: 10-fold cross-validation for robust statistical inference
-Time Series Modeling: ARIMA forecasting with train-test validation (2013-2022)
-Feature Engineering: Decade grouping and audio feature standardization
-Reproducible Research: Complete R workflow with version control and documentation
-
-Key Visualizations
-
-Popularity Distribution: Histogram showing Spotify popularity scores distribution
-Time Series Trends: Multi-panel plot showing evolution of key audio features
-ARIMA Forecasts: Model predictions vs actual values with confidence intervals
-Model Comparison: Side-by-side performance metrics and insights
-
-Limitations & Future Work
-
-Data Scope: Limited to Billboard Hot 100 (US commercial success bias)
-Feature Aggregation: Yearly averaging may mask within-year genre variations
-Popularity Metric: Spotify bias toward recent music and specific demographics
-Model Complexity: Linear assumptions may not capture non-linear relationships
-
-Proposed Extensions
-
-Genre-specific trend analysis
-Artist-level evolution studies
-International market comparisons
-Advanced ML models (Random Forest, XGBoost)
-Lyrical sentiment analysis integration
-
-How to Run
-r# Install required packages
+### Prerequisites
+```r
 install.packages(c("tidyverse", "knitr", "caret", "ggplot2", 
                    "forecast", "tseries", "zoo"))
+```
 
-# Set working directory to project folder
+### Running the Analysis
+```r
+# Set working directory
 setwd("path/to/music-popularity-analysis")
 
 # Run main analysis
 rmarkdown::render("analysis/milestone2_JasonKenney_JoonhyunHeo.Rmd")
-Results Summary
-This project successfully demonstrated that:
+```
 
-Predictive modeling can identify key drivers of song popularity with moderate accuracy (R² = 0.25)
-Time series analysis reveals clear evolutionary patterns in music production
-Cross-validation between approaches strengthens confidence in findings
-Future forecasting provides actionable insights for music industry stakeholders
+## Results Summary
 
-The convergence of popularity predictors and historical trends suggests that the music industry has evolved toward producing songs with characteristics that maximize listener engagement on modern platforms.
+This project successfully demonstrated:
+1. **Predictive modeling** can identify key drivers of song popularity with moderate accuracy (R² = 0.25)
+2. **Time series analysis** reveals clear evolutionary patterns in music production
+3. **Cross-validation** between approaches strengthens confidence in findings
+4. **Future forecasting** provides actionable insights for music industry stakeholders
+
+## Business Applications
+
+- **Music Production**: Guidance for artists and producers on popularity-driving features
+- **Streaming Platforms**: Understanding user preferences for recommendation algorithms
+- **Market Research**: Quantifying music industry trends for strategic planning
+- **A&R Decisions**: Data-driven insights for talent scouting and song selection
+
+## Limitations
+
+- **Data Scope**: Limited to Billboard Hot 100 (US commercial success bias)
+- **Feature Aggregation**: Yearly averaging may mask within-year genre variations
+- **Popularity Metric**: Spotify bias toward recent music and specific demographics
+- **Model Complexity**: Linear assumptions may not capture non-linear relationships
+
+## Future Work
+
+- Genre-specific trend analysis
+- Artist-level evolution studies
+- International market comparisons
+- Advanced ML models (Random Forest, XGBoost)
+- Lyrical sentiment analysis integration
+
+
+*This project was completed as part of the Advanced Software Engineering course at UMass Amherst, demonstrating statistical modeling, data visualization, and reproducible research capabilities.*
