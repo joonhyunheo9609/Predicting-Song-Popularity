@@ -1,0 +1,502 @@
+---
+title: "Music Over the Decades: Predicting Song Popularity"
+author: "Joonhyun Heo & Jason Kenney"
+date: "05/11/2025"
+output:
+  pdf_document:
+    number_sections: true
+---
+
+```{r, echo=FALSE, message = FALSE, results = FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(caret)
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(zoo)
+
+r.version <- "4.3.2"
+seed.val <- 12345
+```
+
+# Introduction
+
+The goal of this analysis is to study how popular music has changed over time and what features of songs make them popular today. We will be looking at songs from the Billboard Hot 100 chart from 1946 to 2022.
+
+Our main questions are:
+
+1. Which sound features best predict a song's popularity today?
+2. How have the sound features of popular songs changed across different decades?
+
+We are using the "Billboard Hot 100 Songs Spotify Data" dataset from Kaggle [1]. This dataset has information about 6,879 songs with 24 explanatory variables for each song. The outcome variable we will be working with is Popularity (a score from 0 to 100 showing how popular the song is today on Spotify). The predictor variables we will be using are sound features like Acousticness, Danceability, Energy, and others.
+
+# Data Processing
+
+In this section, we clean the data and prepare it for analysis. We check for missing values and add decade information to group songs by time period.
+
+```{r echo=FALSE}
+# Load data
+music.df <- read.csv("Billboard_Hot100_Songs_Spotify_1946-2022.csv")
+
+# Check for missing values
+na_count <- sum(is.na(music.df))
+music.df <- na.omit(music.df)
+
+# Add decade information
+music.df$decade <- paste0(floor(music.df$Hot100.Ranking.Year / 10) * 10, "s")
+
+# Check for outliers
+outliers <- music.df[music.df$Popularity < 5 | music.df$Popularity > 95, ]
+```
+
+We found no missing values in our data set. We also found a multitude of songs with very high or very low popularity values (less than 5 or above 95), but we decided to keep these in our analysis because they simply represent very unpopular or popular songs and are useful in our analysis. No need to remove outliers.
+
+# Data Exploration
+
+In this section, we look at the spread of popularity scores and how music features have changed over time.
+
+## Popularity Distribution
+
+First, let's take a look at the spread of popularity scores.
+
+```{r echo=FALSE, out.width="80%", out.height="80%", fig.align = 'center', fig.cap="Distribution of Spotify Popularity Scores"}
+# Make a histogram of popularity scores
+ggplot(music.df, aes(x = Popularity)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Spotify Popularity Scores",
+       x = "Popularity Score (0-100)",
+       y = "# of Songs") +
+  theme_minimal()
+```
+
+```{r echo=FALSE}
+# Calculate basic statistics about popularity
+pop_stats <- data.frame(Min = min(music.df$Popularity),
+  Q1 = quantile(music.df$Popularity, 0.25),
+  Median = median(music.df$Popularity),
+  Mean = mean(music.df$Popularity),
+  Q3 = quantile(music.df$Popularity, 0.75),
+  Max = max(music.df$Popularity),
+  SD = sd(music.df$Popularity)
+)
+
+# Show the statistics in a table
+kable(pop_stats, caption = "Summary Statistics of Spotify Popularity Scores",
+      digits = 2)
+```
+
+Looking at the graph and these summary statistics we can see that the average popularity score is 54.13, and the central value (median) is 58. Most songs have popularity scores between 43 and 70 according to the IQR. These results show that many Billboard Hot 100 songs are still popular today (above 50), but the scores range widely from 0 to 94. Which shows that some older songs have lost almost all viewership.
+
+## How Music Features Predict Popularity
+
+Next, let's see how music features predict the popularity of songs. First we have to separate the music features from the other unrelated variables like "Song" and "Artist.names". These overly-specific variables are insignificant when it comes to predicting popularity and don't relate to the questions we are attempting to answer.
+
+Once separated we are left with 9 predictor variables and the outcome variable.
+
+Outcome Variable - Popularity: A measure from 0 - 100 describing the amount of attention/plays a song receives, this score also reflects how recent this plays were, more weight is given to recent streams
+
+Predictor Variables
+-------------------
+
+Acousticness: A measure from 0.0 to 1.0 of whether the track is acoustic (sound that is not electronically modified)
+
+Danceability: A measure from 0.0 to 1.0 describing how suitable a track is for dancing
+
+Energy: A measure from 0.0 to 1.0 representing intensity and activity
+
+Instrumentalness: Predicts whether a track contains vocals or not (higher values indicate greater likelihood of limited vocals)
+
+Liveness: Detects the presence of an audience in the recording
+
+Loudness: The overall loudness of a track in decibels (dB)
+
+Speechiness: Detects the presence of spoken words in a track
+
+Tempo: The overall estimated tempo of a track in beats per minute (BPM)
+
+Valence: A measure from 0.0 to 1.0 describing the emotional positivity conveyed by a track
+
+
+
+```{r echo=FALSE, out.width="80%", out.height="80%", fig.align = 'center', fig.cap="Changes in Music Features by Decade"}
+
+# Select necessary variables
+music_analysis <- music.df[, c("Popularity", "Acousticness", "Danceability", "Energy", "Instrumentalness", "Liveness", "Loudness", "Speechiness", "Tempo", "Valence")]
+```
+# Training and Testing Data Sets
+
+We split our data into two parts: 70% for training our model and 30% for testing. We use random sampling to make sure both parts have a good mix of songs. Our training data set has 4,815 songs, and our testing data set has 2,064 songs. This split allows us to build our model with most of the data while still having a significant amount left to test.
+
+```{r echo=FALSE}
+#Note these statements use the variables declared in the library load chunk at the beginning.
+RNGversion(r.version)
+set.seed(seed.val)
+
+# Split data into training and testing sets
+trainIndex <- createDataPartition(music_analysis$Popularity, p = .7, 
+                                list = FALSE, 
+                                times = 1)
+train_data <- music_analysis[trainIndex, ]
+test_data <- music_analysis[-trainIndex, ]
+```
+# Modeling Techniques
+
+In this section, we describe the types of models we will use to further our statistical investigation on musical popularity.
+
+## Model 1: Linear Regression (Stepwise)
+
+Since we have many audio features to consider, we will perform stepwise regression on the training data to identify the most significant predictors. We will also be using cross validation to increase the statistical significance of our output.
+
+```{r echo=FALSE}
+fit_allvalues <- lm(Popularity ~ .,data = train_data)
+
+#step(fit_allvalues) - this tells us that Tempo and Speechiness are not significant
+
+fit_step <- lm(Popularity ~ Acousticness + Danceability + Energy + Instrumentalness + Liveness + Loudness + Valence, data = train_data)
+
+train_ctrl <- trainControl(method = "cv", number = 10)
+ 
+step_model <- train(Popularity ~ Acousticness + Danceability + Energy + Instrumentalness + Liveness + Loudness + Valence, train_data, method = "lm", trControl= train_ctrl)
+
+```
+
+The stepwise regression model found that Tempo and Speechiness were not significant in the prediction of popularity. The other 7 variables (Acousticness, Danceability, Energy, Instrumentalness, Liveness, Loudness, Valence) were found to be significant.
+
+### Linear Regression Model Fit Results
+
+The linear regression model can help us to find which music features make songs more popular. To make sure we are on the right track to making these predictions let's take a look at the fit results of this model through the results of a QQ plot, histogram, and residuals plot.
+
+```{r echo=FALSE}
+resids = residuals(step_model$finalModel)
+
+qqnorm(y=resids, main = "")
+qqline(y=resids, datax= FALSE)
+
+
+hist(resids, prob = TRUE, xlab = "residuals", main = "")
+lines(density(resids))
+
+plot(fit_step, which = 1)
+```
+
+These plots show that our model generally works well. The QQ closely resembles a straight line and the residuals histogram only has a slight left skew. However, the residuals and fitted values plot shows some clustering and trends. Which means we should keep looking to see if we can find a better model. Next we will test the prediction performance.
+
+### Linear Regression Model Prediction Performance
+
+In this section we will test our model on the test data to see how well it predicts popularity.
+
+```{r echo=FALSE}
+# Make predictions on the test data
+lm_pred <- predict(step_model, newdata = test_data)
+lm_rmse <- sqrt(mean((test_data$Popularity - lm_pred)^2))
+lm_mae <- mean(abs(test_data$Popularity - lm_pred))
+lm_mse <- mean((test_data$Popularity - lm_pred)^2)
+lm_R2 <- cor(test_data$Popularity, lm_pred)^2
+
+# Evaluate prediction performance
+lm_perf_table <- data.frame( Metric = c("RMSE", "MAE", "MSE", "R^2"), Value = round(c(lm_rmse, lm_mae, lm_mse, lm_R2), 2))
+
+# Show performance metrics in a table
+kable(lm_perf_table, caption = "Linear Regression Model Performance")
+
+ggplot(data = data.frame(Actual = test_data$Popularity, Predicted = lm_pred), aes(x = Actual, y = Predicted)) + geom_point(alpha = 0.4, color = "blue") + geom_abline(slope = 1, intercept = 0, color = "red") + labs(title = "Predicted vs Actual Popularity", x = "Actual", y = "Predicted")
+```
+
+Our model had an average error (RMSE) of 18 points on the test data. This means our predictions were typically about 18 points off from the actual popularity scores (on a 0-100 scale). An MAE of 14.08 shows the average size of our prediction errors. The R^2 of 25% shows that this model has moderate explanatory power on testing data. 
+
+## Model 2 (Time Series Analysis)
+
+We used the same dataset to analyze how music features have changed over time using time series analysis. This approach allows us to identify trends in music production over the decades and predict future directions.
+
+```{r echo=FALSE}
+# Group by year and calculate average audio features
+yearly_avg <- music.df %>%
+  group_by(Hot100.Ranking.Year) %>%
+  summarize(
+    avg_danceability = mean(Danceability, na.rm = TRUE),
+    avg_acousticness = mean(Acousticness, na.rm = TRUE),
+    avg_loudness = mean(Loudness, na.rm = TRUE),
+    count = n()
+  ) %>%
+  filter(count >= 10)  # Only keep years with at least 10 songs
+
+# Create time series objects
+dance.ts <- ts(yearly_avg$avg_danceability, 
+               start = min(yearly_avg$Hot100.Ranking.Year), 
+               frequency = 1)
+acoustic.ts <- ts(yearly_avg$avg_acousticness, 
+                 start = min(yearly_avg$Hot100.Ranking.Year), 
+                 frequency = 1)
+loudness.ts <- ts(yearly_avg$avg_loudness, 
+                 start = min(yearly_avg$Hot100.Ranking.Year), 
+                 frequency = 1)
+```
+
+We transformed the data into time series format by calculating yearly averages for each audio feature. We created time series objects for danceability, acousticness, and loudness - three key features that our previous analysis identified as important. Let's visualize these time series:
+
+```{r echo=FALSE, fig.cap="Changes in Key Audio Features Over Time"}
+# Plot time series
+par(mfrow=c(3,1), mar=c(3,4,2,1))
+
+# Danceability
+plot(dance.ts, main="Danceability (1946-2022)", 
+     xlab="", ylab="Danceability", type="l", col="blue")
+
+# Acousticness
+plot(acoustic.ts, main="Acousticness (1946-2022)", 
+     xlab="", ylab="Acousticness", type="l", col="green")
+
+# Loudness
+plot(loudness.ts, main="Loudness (1946-2022)", 
+     xlab="Year", ylab="Loudness (dB)", type="l", col="red")
+```
+
+The visualizations reveal clear trends:
+- Danceability has gradually increased since the 1980s
+- Acousticness shows a dramatic decline starting around 1980
+- Loudness has steadily increased (becoming less negative) over the decades
+
+### Model 2 Fit Results
+
+For our time series modeling, we split our data into training (up to 2012) and testing (2013-2022) sets:
+
+```{r echo=FALSE}
+# Split data for training and testing
+end_year <- max(yearly_avg$Hot100.Ranking.Year)
+train_end_year <- 2012
+
+# Create training and test sets
+dance_train <- window(dance.ts, end = train_end_year)
+dance_test <- window(dance.ts, start = train_end_year + 1)
+
+acoustic_train <- window(acoustic.ts, end = train_end_year)
+acoustic_test <- window(acoustic.ts, start = train_end_year + 1)
+
+loudness_train <- window(loudness.ts, end = train_end_year)
+loudness_test <- window(loudness.ts, start = train_end_year + 1)
+
+# Test length
+test_length <- length(dance_test)
+```
+
+Following the approach from Lab 9, we applied two types of models for each feature:
+
+1. **Mean and Naive forecasts** as simple benchmark models
+2. **ARIMA models** which can capture more complex patterns
+
+```{r echo=FALSE}
+# Function to evaluate forecast accuracy
+evaluate_forecast <- function(forecast_values, actual_values) {
+  errors <- actual_values - forecast_values
+  rmse <- sqrt(mean(errors^2))
+  return(rmse)
+}
+
+# Apply benchmark models
+# Mean forecast
+dance_mean <- meanf(dance_train, h = test_length)
+acoustic_mean <- meanf(acoustic_train, h = test_length)
+loudness_mean <- meanf(loudness_train, h = test_length)
+
+# Mean forecast metrics
+dance_mean_rmse <- evaluate_forecast(dance_mean$mean, dance_test)
+acoustic_mean_rmse <- evaluate_forecast(acoustic_mean$mean, acoustic_test)
+loudness_mean_rmse <- evaluate_forecast(loudness_mean$mean, loudness_test)
+
+# ARIMA models
+dance_arima <- auto.arima(dance_train)
+acoustic_arima <- auto.arima(acoustic_train)
+loudness_arima <- auto.arima(loudness_train)
+
+# Generate ARIMA forecasts
+dance_arima_fc <- forecast(dance_arima, h = test_length)
+acoustic_arima_fc <- forecast(acoustic_arima, h = test_length)
+loudness_arima_fc <- forecast(loudness_arima, h = test_length)
+
+# ARIMA metrics
+dance_arima_rmse <- evaluate_forecast(dance_arima_fc$mean, dance_test)
+acoustic_arima_rmse <- evaluate_forecast(acoustic_arima_fc$mean, acoustic_test)
+loudness_arima_rmse <- evaluate_forecast(loudness_arima_fc$mean, loudness_test)
+```
+
+The ARIMA models automatically selected the best parameters for each feature. Here's a comparison of one of our model fits against the historical data:
+
+```{r echo=FALSE, fig.cap="ARIMA Model Fit for Danceability"}
+# Plot model fit for Danceability
+plot(dance.ts, main="Danceability: ARIMA Model Fit", 
+     xlab="Year", ylab="Danceability", type="l")
+lines(fitted(dance_arima), col="red")
+legend("bottomright", legend=c("Actual", "Fitted"), 
+       col=c("black", "red"), lty=1)
+```
+
+### Model 2 Prediction Performance
+
+We evaluated our models by comparing their forecasts against the actual values in our test period (2013-2022):
+
+```{r echo=FALSE}
+# Create comparison table
+ts_comparison <- data.frame(
+  Feature = c("Danceability", "Acousticness", "Loudness"),
+  Mean_RMSE = round(c(dance_mean_rmse, acoustic_mean_rmse, loudness_mean_rmse), 4),
+  ARIMA_RMSE = round(c(dance_arima_rmse, acoustic_arima_rmse, loudness_arima_rmse), 4)
+)
+
+# Add best model column
+ts_comparison$Best_Model <- ifelse(ts_comparison$Mean_RMSE < ts_comparison$ARIMA_RMSE, 
+                                   "Mean", "ARIMA")
+
+# Display comparison
+kable(ts_comparison, caption = "Time Series Model Performance (RMSE on Test Data)")
+```
+
+The table shows that ARIMA models generally perform better than the simple mean model, with lower RMSE values for most features. This indicates that there are complex patterns in how music features evolve over time.
+
+Let's visualize how well our ARIMA model predicted danceability:
+
+```{r echo=FALSE, fig.cap="ARIMA Model Forecast vs Actual Values for Danceability"}
+# Plot forecast vs actual for Danceability
+plot(window(dance.ts, start=2000), 
+     main="Danceability: ARIMA Forecast vs Actual", 
+     xlim=c(2000, 2022), ylim=c(min(dance_test), max(dance_test)+0.05),
+     xlab="Year", ylab="Danceability", type="l")
+lines(dance_arima_fc$mean, col="red")
+points(time(dance_test), dance_test, pch=19, col="blue")
+legend("bottomright", legend=c("Historical", "Forecast", "Actual"), 
+       col=c("black", "red", "blue"), lty=c(1,1,NA), pch=c(NA,NA,19))
+```
+
+Based on our model evaluation, we can use ARIMA models to forecast future trends for the next 5 years:
+
+```{r echo=FALSE}
+# Generate future forecasts
+forecast_horizon <- 5
+
+# Fit models to full data and forecast
+dance_future <- forecast(auto.arima(dance.ts), h = forecast_horizon)
+acoustic_future <- forecast(auto.arima(acoustic.ts), h = forecast_horizon)
+loudness_future <- forecast(auto.arima(loudness.ts), h = forecast_horizon)
+
+# Create forecast table
+forecast_years <- (end_year + 1):(end_year + forecast_horizon)
+forecasts_df <- data.frame(
+  Year = forecast_years,
+  Danceability = round(dance_future$mean, 3),
+  Acousticness = round(acoustic_future$mean, 3),
+  Loudness = round(loudness_future$mean, 1)
+)
+
+kable(forecasts_df, caption = "Forecasted Music Features (2023-2027)")
+```
+
+Our forecasts suggest that in the coming years, danceability will continue to increase slightly, acousticness will remain low with minimal change, and loudness appears to be stabilizing after decades of increasing.
+
+# Result Summary
+
+Looking at both models we can see that the linear regression and time series approaches provide complementary insights about music features and popularity.
+
+```{r echo=FALSE}
+# Create a simple summary table
+model_comparison <- data.frame(
+  Model = c("Linear Regression", "Time Series"),
+  Focus = c("Features -> Popularity", "Features over Time"),
+  Key_Insight = c("Danceability (+), Acousticness (-), Loudness (+)", 
+                 "Increasing danceability, decreasing acousticness"),
+  Performance_Metric = c("RMSE: 18.00", "Feature-specific RMSE: 0.01-0.40")
+)
+
+kable(model_comparison, caption = "Comparison of Modeling Approaches")
+```
+
+Our linear regression model focused on identifying which audio features best predict a song's popularity on Spotify. We found that danceability and loudness have positive relationships with popularity, while acousticness has a negative relationship. This suggests that energetic, danceable, and less acoustic songs tend to be more popular.
+
+Our time series analysis examined how these same features have changed over time. Interestingly, we discovered that the features positively associated with popularity (danceability, loudness) have been increasing over the decades, while acousticness, which is negatively associated with popularity, has been decreasing.
+
+```{r echo=FALSE, fig.cap="Relationship Between Model Insights"}
+# Create a simple bar chart
+feature_names <- c("Danceability", "Acousticness", "Loudness")
+reg_direction <- c(1, -1, 1)  # +1 for positive relationship, -1 for negative
+trend_direction <- c(1, -1, 1)  # +1 for increasing trend, -1 for decreasing
+
+# Create a bar plot
+barplot(rbind(reg_direction, trend_direction), 
+        beside = TRUE, 
+        names.arg = feature_names,
+        col = c("blue", "green"),
+        main = "Feature Relationships and Trends",
+        ylab = "Direction (+/-)",
+        ylim = c(-1.5, 1.5))
+legend("bottomright", 
+       legend = c("Popularity Relationship", "Historical Trend"),
+       fill = c("blue", "green"))
+abline(h = 0, lty = 2)
+```
+
+This alignment between what predicts popularity and what has been trending in music production suggests a co-evolution of music creation techniques and listener preferences. Songs have become more danceable, less acoustic, and louder over time - the very characteristics that our regression model identifies as contributing to popularity.
+
+Our time series forecasts predict these trends will continue in the coming years, with popular music likely maintaining high danceability, low acousticness, and relatively high loudness levels. However, some trends like loudness appear to be stabilizing, possibly due to streaming platforms implementing loudness normalization.
+
+In summary, these two modeling approaches together provide a more complete picture than either would alone. The regression model helps us understand what makes songs popular today, while the time series analysis shows how music has evolved over time and where it might be heading.
+
+# Our Conclusions
+
+Did the results help us answer our questions? Were there unexpected results, possibly leading to more questions? How could we take this project further?
+
+## Answers to Research Questions
+
+Our project successfully addressed our two main questions:
+
+1. **Which sound features best predict a song's popularity today?**
+   
+   Our linear regression model identified danceability, energy, and loudness as positive predictors of popularity, while acousticness and instrumentalness showed negative relationships. The model explained about 25% of the variation in popularity scores, which is reasonable given the subjective nature of music preference.
+
+2. **How have the sound features of popular songs changed across different decades?**
+   
+   Our time series analysis revealed clear trends: danceability has increased since the 1980s, acousticness has dramatically decreased since the 1980s, and loudness has consistently increased over the decades until recently. Our ARIMA models captured these patterns well and suggested these trends will continue with some stabilization.
+
+The most interesting finding was the alignment between what predicts popularity and what has been trending historically. Features that have positive relationships with popularity (danceability, loudness) have been increasing over time, while features with negative relationships (acousticness) have been decreasing.
+
+## Unexpected Results
+
+We encountered several surprising findings:
+
+1. **Timing of acoustic decline**: The dramatic drop in acousticness occurred primarily in the 1980s rather than earlier when electric instruments first became popular. This suggests digital technology and synthesizers had a more profound impact than early electrification.
+
+2. **Loudness stabilization**: Despite decades of increasing loudness (the "loudness war"), our forecasts suggest this trend may be plateauing, possibly due to streaming platforms implementing loudness normalization.
+
+3. **Genre-transcending trends**: Despite the diversity of genres on the Billboard charts, the audio features show remarkably consistent trends, suggesting production techniques converge across genres.
+
+4. **Moderate predictive power**: The linear regression model's R² of 0.25 indicates that while audio features are important, they only explain part of what makes a song popular. Factors like artist recognition, marketing, and cultural context clearly play significant roles.
+
+## Limitations and Future Directions
+
+Our analysis had several limitations:
+
+1. **Data representation**: The Billboard Hot 100 represents only commercially successful US music, potentially missing global trends and underground movements.
+
+2. **Aggregation effects**: By averaging features by year, we lost information about within-year variation across different genres and artists.
+
+3. **Measurement reliability**: Spotify's audio features are calculated using proprietary algorithms, making it difficult to assess their precision.
+
+4. **Popularity metric bias**: Spotify's popularity favors recent music due to the platform's user demographics and recency of streaming data.
+
+This project could be extended in several promising ways:
+
+1. **Genre-specific analysis**: Breaking down trends by genre could reveal how different music styles have evolved independently.
+
+2. **Feature interactions**: Exploring how combinations of features affect popularity could yield deeper insights.
+
+3. **Cultural context**: Incorporating external data about technological innovations or cultural events could help explain why certain trends emerged when they did.
+
+4. **Regional comparison**: Analyzing data from different countries could reveal cultural differences in music preferences.
+
+5. **Artist-level analysis**: Examining how individual artists adapt their sound over time could provide insights into creative evolution.
+
+In conclusion, our analysis has quantified and validated patterns in music evolution that might otherwise remain subjective impressions. We've shown how popular music has become more danceable, electronic, and louder over time - the very characteristics that predict higher popularity today. This suggests a co-evolution between production techniques and listener preferences, though the causal direction remains an open question for future research.
+
+# References
+
+1. "Billboard Hot 100 Songs Spotify Data (1946-2022)", Kaggle, https://www.kaggle.com/datasets/tushar5harma/billboard-hot-100-songs-spotify-data-1946-2022
+2. Hyndman, R.J., & Athanasopoulos, G. (2018). Forecasting: principles and practice (2nd ed.). OTexts.
+3. Spotify Web API Documentation, "Audio Features", https://developer.spotify.com/documentation/web-api/reference/get-audio-features
